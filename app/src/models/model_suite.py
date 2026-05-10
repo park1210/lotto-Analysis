@@ -15,43 +15,53 @@ from src.config import (
     MODEL_ARTIFACT_DIR,
     MODEL_OUTPUT_DIR,
     MODEL_RUN_METADATA_FILE,
-    PROCESSED_LOTTO_FILE,
 )
-from src.features.temporal_features import align_features_and_labels, time_based_train_test_split
-from src.features.build_features import build_feature_dataset
+from src.features import FEATURE_SET_ORDER, build_model_feature_bundle
+from src.features.temporal_features import time_based_train_test_split
 from src.models.evaluate import evaluate_number_predictions
 from src.models.predict import probability_matrix_to_number_lists
-from src.models.train_baseline import build_classifier_chain_model, build_logistic_regression_model
-from src.models.train_random_forest import build_random_forest_model
-from src.models.train_xgboost import build_xgboost_model
 
 
-NUMBER_COLS = ["n1", "n2", "n3", "n4", "n5", "n6"]
 LABEL_COLS = [f"y_{i}" for i in range(1, 46)]
 FREQ_COLS = [f"freq_{i}" for i in range(1, 46)]
 GAP_COLS = [f"gap_{i}" for i in range(1, 46)]
 HEURISTIC_MODEL_NAMES = ["freq_heuristic", "gap_heuristic", "random_baseline"]
-ML_MODEL_NAMES = ["logistic_regression", "random_forest", "xgboost", "classifier_chain"]
+ML_MODEL_NAMES = ["logistic_regression", "random_forest", "xgboost", "classifier_chain", "mlp", "soft_voting_ensemble"]
 ALL_MODEL_NAMES = HEURISTIC_MODEL_NAMES + ML_MODEL_NAMES
-DEFAULT_HOLDOUT_MODEL_NAMES = ALL_MODEL_NAMES
+DEFAULT_HOLDOUT_MODEL_NAMES = [
+    "freq_heuristic",
+    "gap_heuristic",
+    "random_baseline",
+    "logistic_regression",
+    "random_forest",
+    "xgboost",
+    "classifier_chain",
+    "soft_voting_ensemble",
+]
 DEFAULT_BACKTEST_MODEL_NAMES = [
     "freq_heuristic",
     "gap_heuristic",
     "random_baseline",
     "logistic_regression",
+    "soft_voting_ensemble",
 ]
 
 
-def prepare_model_data(window: int = 20, test_ratio: float = 0.2) -> dict[str, pd.DataFrame]:
-    feature_df = build_feature_dataset(window=window)
-    df_clean = pd.read_csv(PROCESSED_LOTTO_FILE)
-    label_df = pd.DataFrame(0, index=df_clean.index, columns=LABEL_COLS)
-    for i in range(len(df_clean)):
-        nums = df_clean.loc[i, NUMBER_COLS].tolist()
-        for num in nums:
-            label_df.loc[i, f"y_{num}"] = 1
+def prepare_model_data(
+    window: int = 20,
+    test_ratio: float = 0.2,
+    feature_set_name: str = "base",
+    save_base: bool = True,
+):
+    feature_bundle = build_model_feature_bundle(window=window, save_base=save_base)
 
-    X, y = align_features_and_labels(feature_df, label_df, window=window)
+    if feature_set_name not in feature_bundle.feature_sets:
+        raise ValueError(
+            f"Unsupported feature set '{feature_set_name}'. Available: {sorted(feature_bundle.feature_sets)}"
+        )
+
+    X = feature_bundle.feature_sets[feature_set_name].reset_index(drop=True)
+    y = feature_bundle.y.reset_index(drop=True)
     split_data = time_based_train_test_split(X, y, test_ratio=test_ratio)
 
     return {
@@ -62,6 +72,8 @@ def prepare_model_data(window: int = 20, test_ratio: float = 0.2) -> dict[str, p
         "y_train": split_data["y_train"],
         "y_test": split_data["y_test"],
         "split_idx": split_data["split_idx"],
+        "feature_bundle": feature_bundle,
+        "feature_set_name": feature_set_name,
     }
 
 
@@ -85,7 +97,13 @@ def get_probability_matrix(model, X_frame: pd.DataFrame) -> np.ndarray:
 def evaluate_probability_model(model_name: str, model, X_frame: pd.DataFrame, y_true: pd.DataFrame) -> dict:
     probability_matrix = get_probability_matrix(model, X_frame)
     predicted_number_lists = probability_matrix_to_number_lists(probability_matrix)
-    return evaluate_number_predictions(model_name, predicted_number_lists, y_true, label_cols=LABEL_COLS)
+    return evaluate_number_predictions(
+        model_name,
+        predicted_number_lists,
+        y_true,
+        label_cols=LABEL_COLS,
+        probability_matrix=probability_matrix,
+    )
 
 
 def frequency_heuristic_predictions(X_frame: pd.DataFrame) -> list[list[int]]:
@@ -106,10 +124,30 @@ def random_predictions(n_rows: int, seed: int) -> list[list[int]]:
 
 def build_model_builders(random_seed: int) -> dict[str, object]:
     return {
-        "logistic_regression": lambda: build_logistic_regression_model(random_seed=random_seed),
-        "random_forest": lambda: build_random_forest_model(random_seed=random_seed),
-        "xgboost": lambda: build_xgboost_model(random_seed=random_seed),
-        "classifier_chain": lambda: build_classifier_chain_model(random_seed=random_seed),
+        "logistic_regression": lambda: __import__(
+            "src.models.train_baseline",
+            fromlist=["build_logistic_regression_model"],
+        ).build_logistic_regression_model(random_seed=random_seed),
+        "random_forest": lambda: __import__(
+            "src.models.train_random_forest",
+            fromlist=["build_random_forest_model"],
+        ).build_random_forest_model(random_seed=random_seed),
+        "xgboost": lambda: __import__(
+            "src.models.train_xgboost",
+            fromlist=["build_xgboost_model"],
+        ).build_xgboost_model(random_seed=random_seed),
+        "classifier_chain": lambda: __import__(
+            "src.models.train_baseline",
+            fromlist=["build_classifier_chain_model"],
+        ).build_classifier_chain_model(random_seed=random_seed),
+        "mlp": lambda: __import__(
+            "src.models.train_mlp",
+            fromlist=["build_scaled_mlp_model"],
+        ).build_scaled_mlp_model(random_seed=random_seed),
+        "soft_voting_ensemble": lambda: __import__(
+            "src.models.train_ensemble",
+            fromlist=["build_soft_voting_ensemble_model"],
+        ).build_soft_voting_ensemble_model(random_seed=random_seed),
     }
 
 
@@ -185,10 +223,13 @@ def run_holdout_experiments(
                 "number_level_accuracy": result["number_level_accuracy"],
                 "avg_hit": result["avg_hit"],
                 "hit_std": result["hit_std"],
+                "precision_at_6": result["precision_at_6"],
+                "recall_at_6": result["recall_at_6"],
+                "brier_score": result["brier_score"],
             }
             for result in results
         ]
-    ).sort_values(["avg_hit", "number_level_accuracy"], ascending=False)
+    ).sort_values(["avg_hit", "precision_at_6", "number_level_accuracy"], ascending=False)
 
     holdout_draw_results = pd.concat([result["draw_results"] for result in results], ignore_index=True)
     return holdout_summary, holdout_draw_results, trained_models
@@ -225,6 +266,9 @@ def evaluate_model_on_split(
         "subset_accuracy": result["subset_accuracy"],
         "number_level_accuracy": result["number_level_accuracy"],
         "avg_hit": result["avg_hit"],
+        "precision_at_6": result["precision_at_6"],
+        "recall_at_6": result["recall_at_6"],
+        "brier_score": result["brier_score"],
     }
 
 
@@ -236,6 +280,7 @@ def run_rolling_backtest(
     random_seed: int = 42,
     model_names: list[str] | None = None,
     max_folds: int | None = None,
+    train_window_size: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     X = data["X"]
     y = data["y"]
@@ -249,8 +294,9 @@ def run_rolling_backtest(
             break
 
         test_end = train_end + test_size
-        X_train_fold = X.iloc[:train_end].reset_index(drop=True)
-        y_train_fold = y.iloc[:train_end].reset_index(drop=True)
+        train_start = max(0, train_end - train_window_size) if train_window_size is not None else 0
+        X_train_fold = X.iloc[train_start:train_end].reset_index(drop=True)
+        y_train_fold = y.iloc[train_start:train_end].reset_index(drop=True)
         X_test_fold = X.iloc[train_end:test_end].reset_index(drop=True)
         y_test_fold = y.iloc[train_end:test_end].reset_index(drop=True)
 
@@ -278,6 +324,9 @@ def run_rolling_backtest(
                 "mean_subset_accuracy",
                 "mean_number_level_accuracy",
                 "mean_avg_hit",
+                "mean_precision_at_6",
+                "mean_recall_at_6",
+                "mean_brier_score",
                 "std_avg_hit",
             ]
         )
@@ -287,6 +336,9 @@ def run_rolling_backtest(
             mean_subset_accuracy=("subset_accuracy", "mean"),
             mean_number_level_accuracy=("number_level_accuracy", "mean"),
             mean_avg_hit=("avg_hit", "mean"),
+            mean_precision_at_6=("precision_at_6", "mean"),
+            mean_recall_at_6=("recall_at_6", "mean"),
+            mean_brier_score=("brier_score", "mean"),
             std_avg_hit=("avg_hit", "std"),
         ).sort_values("mean_avg_hit", ascending=False)
 
@@ -343,8 +395,16 @@ def run_full_model_suite(
     backtest_model_names: list[str] | None = None,
     include_backtest: bool = True,
     max_backtest_folds: int | None = None,
+    feature_set_name: str = "base",
+    save_base: bool = True,
+    train_window_size: int | None = None,
 ) -> dict[str, object]:
-    data = prepare_model_data(window=window, test_ratio=test_ratio)
+    data = prepare_model_data(
+        window=window,
+        test_ratio=test_ratio,
+        feature_set_name=feature_set_name,
+        save_base=save_base,
+    )
     resolved_holdout_model_names = resolve_model_names(holdout_model_names, DEFAULT_HOLDOUT_MODEL_NAMES)
     resolved_backtest_model_names = resolve_model_names(backtest_model_names, DEFAULT_BACKTEST_MODEL_NAMES)
 
@@ -363,9 +423,12 @@ def run_full_model_suite(
             random_seed=random_seed,
             model_names=resolved_backtest_model_names,
             max_folds=max_backtest_folds,
+            train_window_size=train_window_size,
         )
     else:
-        backtest_results = pd.DataFrame(columns=["fold", "model", "subset_accuracy", "number_level_accuracy", "avg_hit"])
+        backtest_results = pd.DataFrame(columns=[
+            "fold", "model", "subset_accuracy", "number_level_accuracy", "avg_hit", "precision_at_6", "recall_at_6", "brier_score"
+        ])
         backtest_summary = pd.DataFrame(
             columns=[
                 "model",
@@ -373,6 +436,9 @@ def run_full_model_suite(
                 "mean_subset_accuracy",
                 "mean_number_level_accuracy",
                 "mean_avg_hit",
+                "mean_precision_at_6",
+                "mean_recall_at_6",
+                "mean_brier_score",
                 "std_avg_hit",
             ]
         )
@@ -381,6 +447,8 @@ def run_full_model_suite(
         "window": window,
         "test_ratio": test_ratio,
         "random_seed": random_seed,
+        "feature_set_name": feature_set_name,
+        "available_feature_sets": FEATURE_SET_ORDER,
         "holdout_model_names": resolved_holdout_model_names,
         "backtest_model_names": resolved_backtest_model_names if include_backtest else [],
         "include_backtest": include_backtest,
@@ -389,8 +457,10 @@ def run_full_model_suite(
         "backtest_step_size": backtest_step_size,
         "max_backtest_folds": max_backtest_folds,
         "n_rows": len(data["X"]),
+        "n_features": int(data["X"].shape[1]),
         "n_train_rows": len(data["X_train"]),
         "n_test_rows": len(data["X_test"]),
+        "train_window_size": train_window_size,
     }
 
     paths = save_experiment_outputs(

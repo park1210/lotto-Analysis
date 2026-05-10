@@ -81,12 +81,13 @@ Interpretation: richer internal pattern features help more than calendar/weather
 
 ## Run Guide
 
-This project is notebook-first. The recommended workflow is:
+This project is notebook-first. The preferred workflow is:
 
 1. start Docker and open Jupyter
-2. sync lotto or weather data only when you need fresher source data
-3. run notebooks for analysis and reporting
-4. use `main.py` as a helper CLI rather than the primary analysis interface
+2. use shared pipeline helpers from `src.pipelines` inside notebooks
+3. keep raw collection, preprocessing, feature generation, and modeling reproducible through those shared functions
+4. build official feature sets through `src.features` rather than reassembling them ad hoc inside notebooks
+5. use notebooks for orchestration, interpretation, and export
 
 ### Start Docker
 
@@ -98,16 +99,34 @@ Then open Jupyter:
 
 - `http://localhost:8888`
 
-### Lotto Sync
+### Standard Notebook Bootstrap
+
+Every notebook now resolves the app root in the same way and can import from `src.*`.
+
+Typical first-use imports inside notebooks:
+
+```python
+from src.pipelines import (
+    run_sync_pipeline,
+    run_data_pipeline,
+    run_feature_pipeline,
+    run_weather_fetch_pipeline,
+    run_weather_build_pipeline,
+    run_weather_sync_pipeline,
+    run_model_pipeline,
+)
+```
+
+### Lotto Sync in Notebook
 
 Canonical raw workbook:
 
 - `app/data/raw/lotto_history_latest.xlsx`
 
-Sync command:
+Run from a notebook cell:
 
-```powershell
-docker compose -f docker/docker-compose.yml exec jupyter python main.py sync
+```python
+run_sync_pipeline()
 ```
 
 Behavior:
@@ -117,7 +136,51 @@ Behavior:
 - stops immediately if the next round is unavailable
 - updates the canonical workbook in place
 
-### Weather Sync
+### Data Preprocessing in Notebook
+
+Processed output:
+
+- `app/data/processed/lotto_cleaned.csv`
+
+Run from a notebook cell:
+
+```python
+run_data_pipeline(source="excel")
+```
+
+If you want to point the preprocessing pipeline at a different workbook path from a notebook, you can also pass `file_path=...`.
+
+### Feature Generation in Notebook
+
+Feature output:
+
+- `app/data/processed/lotto_features.csv`
+
+Run from a notebook cell:
+
+```python
+feature_df = run_feature_pipeline(window=20)
+feature_df.head()
+```
+
+For model-facing experiments, prefer the shared feature registry from `src.features` so notebook runs use the same feature-set definitions as the saved artifacts.
+
+Shared feature structure now lives in `src.features`:
+
+- `build_feature_dataset(...)`: canonical base `freq + gap` dataset
+- `build_model_feature_bundle(...)`: aligned labels plus official feature sets
+- `describe_feature_sets(...)`: quick summary of the current feature registry
+
+The current official feature-set names are:
+
+- `base`
+- `base_plus_pattern`
+- `base_plus_context`
+- `full_feature_set`
+
+This keeps Notebook 04, 09, and 10 on the same feature definitions.
+
+### Weather Sync in Notebook
 
 Canonical weather files:
 
@@ -131,63 +194,65 @@ Environment setup:
 KMA_AUTH_KEY=your-issued-key
 ```
 
-Recommended workflow:
+Recommended workflow from notebook cells:
 
 1. fetch raw weather observations
 
-```powershell
-docker compose -f docker/docker-compose.yml exec jupyter python main.py weather-fetch
+```python
+weather_fetch_bundle = run_weather_fetch_pipeline()
 ```
 
 2. build draw-level weather context
 
-```powershell
-docker compose -f docker/docker-compose.yml exec jupyter python main.py weather-build
+```python
+weather_build_bundle = run_weather_build_pipeline()
 ```
 
 Optional combined helper:
 
-```powershell
-docker compose -f docker/docker-compose.yml exec jupyter python main.py weather-sync
+```python
+weather_sync_bundle = run_weather_sync_pipeline()
 ```
 
 Notes:
 
-- prefer `weather-fetch` for incremental collection over multiple runs
-- prefer `weather-build` after fetching because it is local and lighter than remote collection
-- avoid `--force` unless you intentionally want to ignore the weather cache and refetch from scratch
+- prefer `run_weather_fetch_pipeline()` for incremental collection over multiple runs
+- prefer `run_weather_build_pipeline()` after fetching because it is local and lighter than remote collection
+- avoid force-refetch workflows unless you intentionally want to ignore the cached weather observations
 
-### Other CLI Helpers
+### Modeling in Notebook
 
-Data preprocessing only:
+Model outputs:
 
-```powershell
-docker compose -f docker/docker-compose.yml exec jupyter python main.py data --source excel
+- `app/models/results/`
+- `app/models/artifacts/`
+
+Run from a notebook cell:
+
+```python
+results = run_model_pipeline(
+    window=20,
+    test_ratio=0.2,
+    random_seed=42,
+    backtest_initial_train_size=600,
+    backtest_test_size=30,
+    backtest_step_size=30,
+    feature_set_name="base",
+)
 ```
 
-Full batch pipeline:
+You can switch `feature_set_name` to `base_plus_pattern`, `base_plus_context`, or `full_feature_set` when you want Notebook 05 to run the official suite on a richer feature block.
 
-```powershell
-docker compose -f docker/docker-compose.yml exec jupyter python main.py all --source excel --window 20 --test-ratio 0.2 --random-seed 42
-```
-
-### Command Roles Summary
-
-- `sync`: update the raw lotto Excel workbook only
-- `weather-fetch`: fetch and cache weather observations only
-- `weather-build`: build draw-level weather context from cached observations only
-- `weather-sync`: run weather fetch + build in one command
-- `data --source excel`: preprocess and validate lotto data
-- `all --source excel ...`: run data, feature, and model steps end-to-end
-- notebooks: primary workflow for visualization, analysis, and interpretation
+You can also set `train_window_size=200` (or `300`, `500`) to test whether recent-only training is more stable than full-history training.
 
 ## Notebook Guidance
 
 Recommended notebook usage:
 
-- use stored files, not live remote fetches inside notebook cells
-- lotto notebooks should read the canonical workbook or processed CSVs
-- weather notebooks should read `weather_draw_context.csv` after `weather-build`
+- use stored files rather than embedding long live-fetch logic directly in analysis cells
+- keep collection and preprocessing steps callable through `src.pipelines`
+- import reusable logic from `src.analysis`, `src.features`, `src.models`, and `src.visualization`
+- weather notebooks should read `weather_draw_context.csv` after `run_weather_build_pipeline()`
 - weather exploration notebook: `app/notebooks/08_weather_context_analysis.ipynb`
 - weather-aware feature notebook: `app/notebooks/09_weather_feature_modeling.ipynb`
 - model-family comparison notebook: `app/notebooks/10_model_family_comparison.ipynb`
@@ -232,8 +297,8 @@ The most promising follow-up work is now inside the existing lotto-history featu
 
 Recommended directions:
 
-- rerun `10_model_family_comparison.ipynb` with scaled MLP inputs to reduce neural-model instability
-- test recent-round-only modeling windows such as the most recent `200`, `300`, or `500` draws
+- rerun `10_model_family_comparison.ipynb` with the shared feature registry, imbalance-aware linear models, and the weighted soft-voting ensemble
+- test recent-round-only modeling windows such as the most recent `200`, `300`, or `500` draws in a dedicated follow-up notebook
 - add lagged weather-regime features such as dry/wet streak length, recent mean temperature, and short humidity-trend features
 - compare extreme-weather subsets against matched non-extreme draws
 - extend model-family comparison with stronger feature-ranking diagnostics and coefficient/importance summaries

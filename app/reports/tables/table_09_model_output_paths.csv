@@ -8,3 +8,4 @@ artifact_logistic_regression,/workspace/models/artifacts/logistic_regression.job
 artifact_random_forest,/workspace/models/artifacts/random_forest.joblib
 artifact_xgboost,/workspace/models/artifacts/xgboost.joblib
 artifact_classifier_chain,/workspace/models/artifacts/classifier_chain.joblib
+artifact_soft_voting_ensemble,/workspace/models/artifacts/soft_voting_ensemble.joblib

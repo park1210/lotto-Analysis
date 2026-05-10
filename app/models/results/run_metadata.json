@@ -2,6 +2,13 @@
   "window": 20,
   "test_ratio": 0.2,
   "random_seed": 42,
+  "feature_set_name": "base",
+  "available_feature_sets": [
+    "base",
+    "base_plus_pattern",
+    "base_plus_context",
+    "full_feature_set"
+  ],
   "holdout_model_names": [
     "freq_heuristic",
     "gap_heuristic",
@@ -9,20 +16,24 @@
     "logistic_regression",
     "random_forest",
     "xgboost",
-    "classifier_chain"
+    "classifier_chain",
+    "soft_voting_ensemble"
   ],
   "backtest_model_names": [
     "freq_heuristic",
     "gap_heuristic",
     "random_baseline",
-    "logistic_regression"
+    "logistic_regression",
+    "soft_voting_ensemble"
   ],
   "include_backtest": true,
   "backtest_initial_train_size": 600,
   "backtest_test_size": 30,
   "backtest_step_size": 30,
   "max_backtest_folds": null,
-  "n_rows": 1197,
-  "n_train_rows": 957,
-  "n_test_rows": 240
+  "n_rows": 1202,
+  "n_features": 90,
+  "n_train_rows": 961,
+  "n_test_rows": 241,
+  "train_window_size": null
 }

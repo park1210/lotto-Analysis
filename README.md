@@ -12,11 +12,13 @@ This project studies Korean Lotto 6/45 history through a notebook-first workflow
 - exploratory and statistical analysis
 - calendar and weather context analysis
 - baseline and extended model comparison
+- recent-window validation and final candidate selection
+- probability ranking and ticket-generation strategy analysis
 - report-ready figure and table exports
 
 ## Project Status
 
-The project currently includes notebook steps `01` through `10`.
+The project currently includes notebook steps `01` through `14`.
 
 - `01_data_collection.ipynb`: data collection overview
 - `02_eda.ipynb`: exploratory visualization
@@ -28,6 +30,10 @@ The project currently includes notebook steps `01` through `10`.
 - `08_weather_context_analysis.ipynb`: weather context analysis
 - `09_weather_feature_modeling.ipynb`: weather-aware feature comparison
 - `10_model_family_comparison.ipynb`: feature-set and model-family comparison
+- `11_recent_window_modeling.ipynb`: recent-history window comparison
+- `12_final_candidate_selection.ipynb`: final candidate shortlist and recommendation
+- `13_probability_ranking_analysis.ipynb`: probability calibration and ranking diagnostics
+- `14_ticket_generation_strategy.ipynb`: ticket-construction strategy comparison
 
 ## Current Findings
 
@@ -78,6 +84,47 @@ From `10_model_family_comparison.ipynb`:
 - `base_plus_context + mlp` matched the top backtest mean by average score, but fold-level paths differ and the model should be interpreted cautiously because MLP remains sensitive to scaling and small-sample instability
 
 Interpretation: richer internal pattern features help more than calendar/weather context, and robust superiority over random-style baselines remains limited.
+
+### Recent-Window Modeling
+
+From `11_recent_window_modeling.ipynb`:
+
+- the most promising recent-only regime is `last_500`
+- strongest holdout candidate: `base_plus_context + soft_voting_ensemble + last_500 = 0.9046`
+- strongest shortlist candidates are concentrated around `soft_voting_ensemble`, `mlp`, and `classifier_chain`
+- backtest improvements remain moderate rather than decisive
+
+Interpretation: trimming the training history to the most recent `500` draws appears more useful than `last_300` or `last_200`, but the gain is not so large that it overturns the project's overall conservative conclusion.
+
+### Final Candidate and Ranking
+
+From `12_final_candidate_selection.ipynb` and `13_probability_ranking_analysis.ipynb`:
+
+- final recommended candidate:
+  - `feature_set = full_feature_set`
+  - `model = soft_voting_ensemble`
+  - `training_regime = last_500`
+- ranking summary:
+  - `avg_hit = 0.8631`
+  - `precision_at_6 = 0.1438`
+  - `brier_score = 0.1952`
+- mean predicted probability:
+  - positives `= 0.2774`
+  - negatives `= 0.2680`
+
+Interpretation: the final candidate behaves like a usable ranking model, but positive and negative probabilities are only modestly separated. This supports a "probability ranking" interpretation more than a strong deterministic forecasting claim.
+
+### Ticket Strategy Comparison
+
+From `14_ticket_generation_strategy.ipynb`:
+
+- best single-ticket strategy:
+  - `greedy_top6 = 0.8631 avg_hit`
+- best diversity-oriented multi-ticket strategy:
+  - `weighted_sampling = 1.43 mean pairwise overlap`
+- `diversified_top_pool` is currently less compelling than `weighted_sampling` because it overlaps much more while still trailing `greedy_top6` on average hit
+
+Interpretation: if we want one representative ticket, `greedy_top6` is the simplest and strongest option. If we want multiple tickets with broader coverage, `weighted_sampling` is the better strategy.
 
 ## Run Guide
 
@@ -256,6 +303,10 @@ Recommended notebook usage:
 - weather exploration notebook: `app/notebooks/08_weather_context_analysis.ipynb`
 - weather-aware feature notebook: `app/notebooks/09_weather_feature_modeling.ipynb`
 - model-family comparison notebook: `app/notebooks/10_model_family_comparison.ipynb`
+- recent-window notebook: `app/notebooks/11_recent_window_modeling.ipynb`
+- final candidate notebook: `app/notebooks/12_final_candidate_selection.ipynb`
+- ranking diagnostics notebook: `app/notebooks/13_probability_ranking_analysis.ipynb`
+- ticket strategy notebook: `app/notebooks/14_ticket_generation_strategy.ipynb`
 
 ## Repository Layout
 
@@ -291,14 +342,27 @@ Practical guidance for this repository:
 - never commit `.env` or any private API key
 - the safest minimal-publication approach is to prioritize `draw_metadata.csv` and `weather_draw_context.csv`
 
+## Project Conclusion
+
+The current project is best framed as a ranking-and-recommendation study rather than a direct exact-number prediction system.
+
+- final representative model:
+  - `full_feature_set + soft_voting_ensemble + last_500`
+- final single-ticket strategy:
+  - `greedy_top6`
+- final diversified multi-ticket strategy:
+  - `weighted_sampling`
+
+The evidence still supports a conservative interpretation: internal temporal and pattern features help more than external calendar/weather context, recent `500`-draw training is the most useful recent-window regime tested so far, and the resulting model is more credible as a probability-ranking engine than as a strong exact-outcome forecaster.
+
 ## Suggested Next Analyses
 
-The most promising follow-up work is now inside the existing lotto-history feature space rather than from adding more external covariates.
+The strongest next steps now build on the final ranking model rather than on adding more external covariates.
 
 Recommended directions:
 
-- rerun `10_model_family_comparison.ipynb` with the shared feature registry, imbalance-aware linear models, and the weighted soft-voting ensemble
-- test recent-round-only modeling windows such as the most recent `200`, `300`, or `500` draws in a dedicated follow-up notebook
-- add lagged weather-regime features such as dry/wet streak length, recent mean temperature, and short humidity-trend features
-- compare extreme-weather subsets against matched non-extreme draws
-- extend model-family comparison with stronger feature-ranking diagnostics and coefficient/importance summaries
+- tune the final candidate further around `soft_voting_ensemble + full_feature_set + last_500`
+- add coefficient and feature-importance summaries so the winning feature groups are more interpretable
+- compare calibration and ranking quality against a lighter top candidate such as `classifier_chain` or `mlp`
+- refine `weighted_sampling` and replace `diversified_top_pool` with a stronger diversity-aware generator
+- add a final "next draw recommendation" notebook or export layer built on the selected ranking model

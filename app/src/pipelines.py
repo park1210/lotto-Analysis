@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.config import PROCESSED_LOTTO_FILE
+from src.config import PROCESSED_LOTTO_FILE, RAW_LOTTO_FILE
 from src.data.load_data import load_lotto_source
 from src.data.preprocess import preprocess_lotto_data, save_processed_lotto
 from src.data.sync_lotto_html import sync_lotto_history_html
@@ -24,9 +24,10 @@ def run_data_pipeline(
     start_round: int = 1,
     end_round: int | None = None,
 ):
+    resolved_file_path = RAW_LOTTO_FILE if file_path is None else file_path
     raw_df = load_lotto_source(
         source=source,
-        file_path=file_path,
+        file_path=resolved_file_path,
         start_round=start_round,
         end_round=end_round,
     )
